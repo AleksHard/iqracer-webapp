@@ -161,6 +161,7 @@
     <h2>Пазл собран!</h2>
     <p id="resultLine"></p>
     <p class="record" id="recordLine"></p>
+    <p id="autoNote"></p>
     <div class="actions">
       <button id="sendBtn" style="display:none">✅ Отправить результат боту</button>
       <button id="againBtn" class="secondary">Сыграть ещё</button>
@@ -372,14 +373,21 @@
     showBest();
 
     var send = document.getElementById('sendBtn');
-    send.style.display = (params.get('report') === '1' && tg && tg.initData && tg.sendData) ? '' : 'none';
+    var canReport = params.get('report') === '1' && tg && tg.initData && tg.sendData;
+    send.style.display = canReport ? '' : 'none';
+    // ?auto=1 — результат уходит боту сам, игроку не нужно искать кнопку (приложение закроется)
+    if (canReport && params.get('auto') === '1') {
+      document.getElementById('autoNote').textContent = 'Отправляем результат боту…';
+      setTimeout(sendResult, 1800);
+    }
     setTimeout(function () { overlay.classList.add('show'); }, 650);
   }
 
   function newGame() {
     clearInterval(timerId); timerId = null;
-    started = false; solved = false; selected = -1; moves = 0; seconds = 0;
+    started = false; solved = false; resultSent = false; selected = -1; moves = 0; seconds = 0;
     movesEl.textContent = '0'; timeEl.textContent = '0:00';
+    document.getElementById('autoNote').textContent = '';
     overlay.classList.remove('show');
     boardEl.classList.remove('solved');
     build();
@@ -415,10 +423,14 @@
   });
   document.getElementById('shuffleBtn').addEventListener('click', newGame);
   document.getElementById('againBtn').addEventListener('click', newGame);
-  document.getElementById('sendBtn').addEventListener('click', function () {
+  var resultSent = false;
+  function sendResult() {
+    if (resultSent || !solved) return;
+    resultSent = true;
     // Формат для бота: PUZZLE_SOLVED|размер|ходы|секунды
-    try { tg.sendData('PUZZLE_SOLVED|' + n + '|' + moves + '|' + seconds); } catch (e) {}
-  });
+    try { tg.sendData('PUZZLE_SOLVED|' + n + '|' + moves + '|' + seconds); } catch (e) { resultSent = false; }
+  }
+  document.getElementById('sendBtn').addEventListener('click', sendResult);
   document.getElementById('sizes').addEventListener('click', function (ev) {
     var b = ev.target.closest('button');
     if (!b) return;
