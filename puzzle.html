@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>IQRacer — Пазл</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    /* Запасные цвета для открытия вне Telegram (светлая и тёмная тема браузера) */
+    --fb-bg: #ffffff; --fb-text: #1a1a1a; --fb-hint: #7d8590; --fb-btn: #2481cc;
+    --fb-btn-text: #ffffff; --fb-secondary: #eef1f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fb-bg: #17212b; --fb-text: #f5f5f5; --fb-hint: #8b98a5; --fb-btn: #3b9bf0;
+      --fb-btn-text: #ffffff; --fb-secondary: #232e3c;
+    }
+  }
+  :root {
+    --bg: var(--tg-theme-bg-color, var(--fb-bg));
+    --text: var(--tg-theme-text-color, var(--fb-text));
+    --hint: var(--tg-theme-hint-color, var(--fb-hint));
+    --btn: var(--tg-theme-button-color, var(--fb-btn));
+    --btn-text: var(--tg-theme-button-text-color, var(--fb-btn-text));
+    --secondary: var(--tg-theme-secondary-bg-color, var(--fb-secondary));
+    --board: min(92vw, calc(100vh - 250px), 520px);
+  }
+  @supports (height: 100dvh) {
+    :root { --board: min(92vw, calc(100dvh - 250px), 520px); }
+  }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; min-height: 100%;
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    overscroll-behavior: none;
+    -webkit-user-select: none; user-select: none;
+  }
+  .app {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 12px; padding: 14px 0 calc(14px + env(safe-area-inset-bottom));
+    min-height: 100vh;
+  }
+  h1 { margin: 0; font-size: 20px; font-weight: 700; }
+  .best { font-size: 13px; color: var(--hint); min-height: 16px; margin-top: -6px; }
+
+  .stats { display: flex; gap: 10px; }
+  .stat {
+    background: var(--secondary); border-radius: 12px; padding: 6px 16px; text-align: center; min-width: 88px;
+  }
+  .stat b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+  .stat span { font-size: 11px; color: var(--hint); text-transform: uppercase; letter-spacing: .04em; }
+
+  .board {
+    position: relative; width: var(--board); height: var(--board);
+    background: var(--secondary); border-radius: 14px; touch-action: manipulation;
+  }
+  .tile {
+    position: absolute; left: 0; top: 0;
+    width: calc(100% / var(--n)); height: calc(100% / var(--n));
+    padding: 2px; cursor: pointer;
+    transition: transform .2s ease;
+  }
+  .tile.instant { transition: none; }
+  .face {
+    position: relative; width: 100%; height: 100%; overflow: hidden;
+    border-radius: 9px; box-shadow: 0 1px 4px rgba(0,0,0,.28);
+    transition: transform .12s ease, box-shadow .12s ease;
+  }
+  .tile.moving { z-index: 2; }
+  .tile.selected { z-index: 3; }
+  .tile.selected .face {
+    transform: scale(.93);
+    box-shadow: 0 0 0 4px #ff9f1c, 0 0 0 6px rgba(0,0,0,.55), 0 6px 16px rgba(0,0,0,.45);
+  }
+  .tile.selected .face::after {
+    content: ''; position: absolute; inset: 0; background: rgba(255,159,28,.28);
+  }
+  .face img {
+    position: absolute; width: calc(var(--n) * 100%); height: calc(var(--n) * 100%);
+    max-width: none; object-fit: cover; pointer-events: none; -webkit-user-drag: none;
+  }
+  .face .num {
+    position: absolute; left: 6px; top: 4px; font-size: 13px; font-weight: 700; color: #fff;
+    text-shadow: 0 1px 3px rgba(0,0,0,.8); display: none;
+  }
+  .numbers .face .num { display: block; }
+  .board.solved .tile { cursor: default; }
+
+  .preview {
+    position: absolute; inset: 0; border-radius: 14px; overflow: hidden;
+    opacity: 0; pointer-events: none; transition: opacity .15s ease;
+  }
+  .preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .preview.show { opacity: 1; }
+
+  .controls { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; padding: 0 10px; }
+  button {
+    font: inherit; font-size: 14px; padding: 10px 13px; border: none; border-radius: 12px; white-space: nowrap;
+    background: var(--btn); color: var(--btn-text); cursor: pointer; touch-action: manipulation;
+  }
+  button.secondary { background: var(--secondary); color: var(--text); }
+  button.on { outline: 2px solid var(--btn); }
+  .sizes { display: flex; gap: 6px; background: var(--secondary); padding: 4px; border-radius: 14px; }
+  .sizes button { background: transparent; color: var(--text); padding: 6px 14px; font-size: 14px; }
+  .sizes button.active { background: var(--btn); color: var(--btn-text); }
+  .tip { font-size: 12px; color: var(--hint); text-align: center; max-width: 320px; padding: 0 12px; }
+
+  .overlay {
+    position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    background: rgba(0,0,0,.45); z-index: 10; padding: 20px;
+  }
+  .overlay.show { display: flex; }
+  .card {
+    background: var(--bg); color: var(--text); border-radius: 18px; padding: 24px 22px 20px;
+    text-align: center; width: min(88vw, 340px); box-shadow: 0 8px 30px rgba(0,0,0,.35);
+    animation: pop .28s ease-out;
+  }
+  .card .big { font-size: 46px; line-height: 1; margin-bottom: 8px; }
+  .card h2 { margin: 0 0 6px; font-size: 22px; }
+  .card p { margin: 0 0 4px; color: var(--hint); font-size: 15px; }
+  .card .record { color: #e8a317; font-weight: 700; }
+  .card .actions { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
+  @keyframes pop { from { transform: scale(.85); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <h1>🧩 Пазл IQRacer</h1>
+  <div class="best" id="best"></div>
+
+  <div class="stats">
+    <div class="stat"><b id="moves">0</b><span>ходов</span></div>
+    <div class="stat"><b id="time">0:00</b><span>время</span></div>
+  </div>
+
+  <div class="board" id="board">
+    <div class="preview" id="preview"><img id="previewImg" alt="" draggable="false"></div>
+  </div>
+
+  <div class="controls">
+    <button class="secondary" id="peekBtn">👁 Подсмотреть</button>
+    <button class="secondary" id="numBtn">🔢 Номера</button>
+    <button id="shuffleBtn">🔀 Заново</button>
+  </div>
+
+  <div class="sizes" id="sizes">
+    <button data-n="3">3×3</button>
+    <button data-n="4">4×4</button>
+    <button data-n="5">5×5</button>
+  </div>
+
+  <div class="tip">Нажмите на одну плитку — она подсветится, затем на другую — они поменяются местами. Соберите картинку целиком.</div>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="card">
+    <div class="big">🎉</div>
+    <h2>Пазл собран!</h2>
+    <p id="resultLine"></p>
+    <p class="record" id="recordLine"></p>
+    <div class="actions">
+      <button id="sendBtn" style="display:none">✅ Отправить результат боту</button>
+      <button id="againBtn" class="secondary">Сыграть ещё</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ---------- Параметры страницы ----------
+  //  ?img=photo.jpg  — своя картинка (файл рядом со страницей или полная ссылка)
+  //  ?size=3|4|5     — размер поля (по умолчанию 3, запоминается)
+  //  ?report=1       — после победы показать кнопку «Отправить результат боту»
+  //                    (работает, если страницу открыли кнопкой клавиатуры бота)
+  var params = new URLSearchParams(location.search);
+  var tg = (window.Telegram && window.Telegram.WebApp) || null;
+  if (tg) { try { tg.ready(); tg.expand(); } catch (e) {} }
+
+  function store(key, value) {
+    try { if (value === undefined) { return localStorage.getItem(key); } localStorage.setItem(key, value); } catch (e) {}
+    return null;
+  }
+  function haptic(kind) {
+    try {
+      if (!tg || !tg.HapticFeedback) return;
+      if (kind === 'win') tg.HapticFeedback.notificationOccurred('success');
+      else tg.HapticFeedback.impactOccurred('light');
+    } catch (e) {}
+  }
+
+  // ---------- Картинка по умолчанию (нарисована прямо в коде, файлов не нужно) ----------
+  var DEFAULT_SVG =
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 600 600'>" +
+    "<defs>" +
+    "<linearGradient id='sky' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#1d1b5c'/><stop offset='.4' stop-color='#a23b72'/><stop offset='.72' stop-color='#ff7a59'/><stop offset='1' stop-color='#ffd166'/></linearGradient>" +
+    "<linearGradient id='sea' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#0f8aa0'/><stop offset='1' stop-color='#06283d'/></linearGradient>" +
+    "<radialGradient id='sun'><stop offset='0' stop-color='#fff4c2'/><stop offset='.6' stop-color='#ffd166'/><stop offset='1' stop-color='#ff9f1c'/></radialGradient>" +
+    "</defs>" +
+    "<rect width='600' height='600' fill='url(#sky)'/>" +
+    // звёзды
+    "<g fill='#fff'><circle cx='40' cy='40' r='2.5'/><circle cx='120' cy='85' r='2'/><circle cx='210' cy='30' r='3'/><circle cx='290' cy='95' r='2'/><circle cx='360' cy='45' r='2.5'/><circle cx='470' cy='70' r='2'/><circle cx='550' cy='35' r='3'/><circle cx='575' cy='120' r='2'/><circle cx='70' cy='150' r='2'/><circle cx='330' cy='150' r='1.8'/></g>" +
+    // луна-полумесяц и облака
+    "<circle cx='505' cy='150' r='26' fill='#fff7d6'/><circle cx='516' cy='142' r='24' fill='#7a2c6e'/>" +
+    "<g fill='#ffb4a2' opacity='.85'><ellipse cx='95' cy='215' rx='70' ry='15'/><ellipse cx='140' cy='200' rx='46' ry='13'/><ellipse cx='380' cy='235' rx='80' ry='14'/><ellipse cx='430' cy='219' rx='50' ry='12'/></g>" +
+    // воздушный шар, падающая звезда, птицы и дельфин — приметные детали
+    "<g><ellipse cx='85' cy='95' rx='30' ry='36' fill='#ef476f'/><path d='M55 95 Q85 150 115 95' fill='#ffd166'/><path d='M70 100 Q85 60 100 100' fill='#06d6a0' opacity='.9'/>" +
+    "<line x1='72' y1='128' x2='80' y2='150' stroke='#3a2410' stroke-width='2'/><line x1='98' y1='128' x2='90' y2='150' stroke='#3a2410' stroke-width='2'/><rect x='76' y='150' width='18' height='12' fill='#6b2d1f'/></g>" +
+    "<g stroke='#fff' stroke-linecap='round'><line x1='250' y1='42' x2='330' y2='86' stroke-width='3' opacity='.9'/><line x1='250' y1='42' x2='290' y2='64' stroke-width='7' opacity='.35'/></g><circle cx='332' cy='87' r='5' fill='#fff'/>" +
+    "<g fill='none' stroke='#2b0f3d' stroke-width='3' stroke-linecap='round'><path d='M270 270 q10 -12 20 0 q10 -12 20 0'/><path d='M310 245 q8 -10 16 0 q8 -10 16 0'/><path d='M240 300 q7 -9 14 0 q7 -9 14 0'/></g>" +
+    "<g fill='#9be7f0' opacity='.9'><path d='M330 598 q18 -52 48 -34 q-20 2 -26 34 Z'/><circle cx='372' cy='566' r='3' fill='#06283d'/></g>" +
+    // солнце
+    "<circle cx='430' cy='345' r='118' fill='#ffd166' opacity='.28'/><circle cx='430' cy='345' r='78' fill='url(#sun)'/>" +
+    // горы
+    "<path d='M0 395 L70 330 L140 372 L235 300 L330 380 L420 330 L510 372 L600 318 L600 420 L0 420 Z' fill='#4a2c6b'/>" +
+    "<path d='M0 410 L90 360 L180 405 L290 345 L400 410 L500 362 L600 400 L600 430 L0 430 Z' fill='#2e1d52'/>" +
+    // море
+    "<rect y='405' width='600' height='195' fill='url(#sea)'/>" +
+    "<g fill='#ffd166'><rect x='385' y='412' width='90' height='5' opacity='.85'/><rect x='398' y='428' width='64' height='5' opacity='.7'/><rect x='410' y='444' width='42' height='5' opacity='.6'/><rect x='418' y='462' width='28' height='5' opacity='.5'/><rect x='424' y='482' width='16' height='5' opacity='.4'/></g>" +
+    "<g fill='none' stroke='#9be7f0' stroke-width='3' stroke-linecap='round' opacity='.55'><path d='M20 440 q15 -10 30 0 t30 0'/><path d='M250 458 q15 -10 30 0 t30 0 t30 0'/><path d='M60 505 q18 -11 36 0 t36 0 t36 0'/><path d='M330 520 q18 -11 36 0 t36 0'/><path d='M470 548 q16 -10 32 0 t32 0 t32 0'/><path d='M120 565 q14 -9 28 0 t28 0'/></g>" +
+    // берег под башней
+    "<path d='M0 492 Q120 470 250 500 L250 600 L0 600 Z' fill='#e9c46a'/><path d='M0 520 Q130 500 250 530 L250 600 L0 600 Z' fill='#f4a261'/>" +
+    // башня-лотос (Нячанг)
+    "<g>" +
+    "<rect x='85' y='402' width='120' height='92' fill='#c1121f'/>" +
+    "<g fill='#ffd166'><rect x='98' y='416' width='14' height='20'/><rect x='122' y='416' width='14' height='20'/><rect x='146' y='416' width='14' height='20'/><rect x='170' y='416' width='14' height='20'/><rect x='98' y='450' width='14' height='20'/><rect x='122' y='450' width='14' height='20'/><rect x='146' y='450' width='14' height='20'/><rect x='170' y='450' width='14' height='20'/></g>" +
+    "<path d='M145 120 C118 190 108 265 122 405 L168 405 C182 265 172 190 145 120 Z' fill='#ff9f1c'/>" +
+    "<path d='M145 190 C90 240 72 320 92 405 L132 405 C118 330 126 255 145 190 Z' fill='#f77f00'/>" +
+    "<path d='M145 190 C200 240 218 320 198 405 L158 405 C172 330 164 255 145 190 Z' fill='#e85d04'/>" +
+    "<path d='M145 120 L145 405' stroke='#ffd166' stroke-width='2' opacity='.6'/>" +
+    "<circle cx='145' cy='112' r='7' fill='#ffd166'/>" +
+    "</g>" +
+    // пальмы
+    "<g stroke='#3a2410' stroke-width='9' fill='none' stroke-linecap='round'><path d='M520 560 Q528 470 505 395'/><path d='M565 570 Q572 500 590 440'/></g>" +
+    "<g fill='#2d6a4f'><path d='M505 395 q-45 -10 -75 20 q40 -12 75 -8 Z'/><path d='M505 395 q40 -30 85 -8 q-45 0 -85 8 Z'/><path d='M505 395 q-25 -40 -70 -40 q40 15 70 40 Z'/><path d='M505 395 q10 -50 55 -62 q-30 30 -55 62 Z'/>" +
+    "<path d='M590 440 q-40 -5 -60 22 q35 -12 60 -10 Z'/><path d='M590 440 q10 -35 -20 -60 q5 35 20 60 Z'/></g>" +
+    // лодка с парусом
+    "<path d='M300 508 L372 508 L358 528 L314 528 Z' fill='#6b2d1f'/><path d='M336 430 L336 506 L292 506 Z' fill='#fff'/><path d='M340 440 L340 506 L368 506 Z' fill='#ffe5d9'/><rect x='334' y='426' width='4' height='84' fill='#3a2410'/>" +
+    // подпись
+    "<rect x='22' y='552' width='206' height='34' rx='8' fill='#06283d' opacity='.78'/>" +
+    "<text x='36' y='575' font-family='Arial, Helvetica, sans-serif' font-size='20' font-weight='bold' fill='#ffd166'>IQ RACER</text>" +
+    "<text x='140' y='575' font-family='Arial, Helvetica, sans-serif' font-size='15' fill='#fff'>Nha Trang</text>" +
+    "</svg>";
+  var DEFAULT_IMG = 'data:image/svg+xml;utf8,' + encodeURIComponent(DEFAULT_SVG);
+
+  // ---------- Состояние ----------
+  var n = 3;                 // размер поля (n×n плиток)
+  var tiles = [];            // tiles[позиция] = номер плитки (это её «домашняя» позиция)
+  var tileEls = [];          // DOM-элементы плиток по номеру
+  var selected = -1;         // позиция выбранной плитки или -1
+  var moves = 0, seconds = 0, timerId = null, started = false, solved = false;
+  var imgSrc = DEFAULT_IMG;
+
+  var boardEl = document.getElementById('board');
+  var previewEl = document.getElementById('preview');
+  var previewImg = document.getElementById('previewImg');
+  var movesEl = document.getElementById('moves');
+  var timeEl = document.getElementById('time');
+  var bestEl = document.getElementById('best');
+  var overlay = document.getElementById('overlay');
+
+  function fmtTime(s) { return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+  function bestKey() { return 'iqracer_puzzle_swap_best_' + n; }
+  function getBest() {
+    try { return JSON.parse(store(bestKey()) || 'null'); } catch (e) { return null; }
+  }
+  function showBest() {
+    var b = getBest();
+    bestEl.textContent = b ? ('Рекорд ' + n + '×' + n + ': ' + b.moves + ' ходов, ' + fmtTime(b.time)) : '';
+  }
+
+  // ---------- Логика ----------
+  function isSolved() {
+    for (var i = 0; i < n * n; i++) { if (tiles[i] !== i) return false; }
+    return true;
+  }
+
+  // Случайная перестановка плиток. Обмен любых двух плиток допустим, поэтому
+  // любая раскладка решаема. Не даём ей оказаться собранной или почти собранной.
+  function shuffle() {
+    var total = n * n, maxFixed = Math.floor(total / 4), fixed;
+    do {
+      tiles = [];
+      for (var i = 0; i < total; i++) tiles.push(i);
+      for (var k = total - 1; k > 0; k--) {
+        var j = Math.floor(Math.random() * (k + 1)), t = tiles[k];
+        tiles[k] = tiles[j]; tiles[j] = t;
+      }
+      fixed = 0;
+      for (var q = 0; q < total; q++) { if (tiles[q] === q) fixed++; }
+    } while (isSolved() || fixed > maxFixed);
+  }
+
+  // Нажатие на плитку: первая выбирается (подсвечивается), вторая — меняется с ней местами
+  function pick(pos) {
+    if (solved) return;
+    if (selected === -1) { selected = pos; haptic('move'); updateSelection(); return; }
+    if (selected === pos) { selected = -1; updateSelection(); return; }   // повторное нажатие — отмена выбора
+    swap(selected, pos);
+  }
+
+  function swap(a, b) {
+    var t = tiles[a]; tiles[a] = tiles[b]; tiles[b] = t;
+    selected = -1;
+    moves++;
+    movesEl.textContent = moves;
+    if (!started) { started = true; timerId = setInterval(tick, 1000); }
+    haptic('move');
+    [tileEls[tiles[a]], tileEls[tiles[b]]].forEach(function (el) {
+      el.classList.add('moving');
+      setTimeout(function () { el.classList.remove('moving'); }, 260);
+    });
+    render();
+    updateSelection();
+    if (isSolved()) win();
+  }
+
+  function tick() { seconds++; timeEl.textContent = fmtTime(seconds); }
+
+  // ---------- Отрисовка ----------
+  function build() {
+    tileEls.forEach(function (el) { el.remove(); });   // preview остаётся на месте
+    tileEls = [];
+    boardEl.style.setProperty('--n', n);
+    for (var id = 0; id < n * n; id++) {
+      var el = document.createElement('div');
+      el.className = 'tile';
+      el.dataset.id = id;
+      var face = document.createElement('div');
+      face.className = 'face';
+      var img = document.createElement('img');
+      img.src = imgSrc; img.alt = ''; img.draggable = false;
+      img.style.left = (-(id % n) * 100) + '%';
+      img.style.top = (-Math.floor(id / n) * 100) + '%';
+      var num = document.createElement('span');
+      num.className = 'num'; num.textContent = id + 1;
+      face.appendChild(img); face.appendChild(num);
+      el.appendChild(face);
+      boardEl.appendChild(el);
+      tileEls.push(el);
+    }
+  }
+
+  function render() {
+    for (var pos = 0; pos < n * n; pos++) {
+      tileEls[tiles[pos]].style.transform =
+        'translate(' + (pos % n) * 100 + '%, ' + Math.floor(pos / n) * 100 + '%)';
+    }
+  }
+
+  function updateSelection() {
+    for (var pos = 0; pos < n * n; pos++) {
+      tileEls[tiles[pos]].classList.toggle('selected', pos === selected);
+    }
+  }
+
+  function win() {
+    solved = true;
+    selected = -1; updateSelection();
+    clearInterval(timerId); timerId = null;
+    boardEl.classList.add('solved');
+    haptic('win');
+
+    var b = getBest(), isRecord = !b || moves < b.moves || (moves === b.moves && seconds < b.time);
+    if (isRecord) store(bestKey(), JSON.stringify({ moves: moves, time: seconds }));
+    document.getElementById('resultLine').textContent = n + '×' + n + ' · ' + moves + ' ходов · ' + fmtTime(seconds);
+    document.getElementById('recordLine').textContent = isRecord ? '🏆 Новый рекорд!' : '';
+    showBest();
+
+    var send = document.getElementById('sendBtn');
+    send.style.display = (params.get('report') === '1' && tg && tg.initData && tg.sendData) ? '' : 'none';
+    setTimeout(function () { overlay.classList.add('show'); }, 650);
+  }
+
+  function newGame() {
+    clearInterval(timerId); timerId = null;
+    started = false; solved = false; selected = -1; moves = 0; seconds = 0;
+    movesEl.textContent = '0'; timeEl.textContent = '0:00';
+    overlay.classList.remove('show');
+    boardEl.classList.remove('solved');
+    build();
+    shuffle();
+    // первая отрисовка без анимации, чтобы плитки не «слетались» с угла
+    tileEls.forEach(function (el) { el.classList.add('instant'); });
+    render();
+    void boardEl.offsetWidth;
+    tileEls.forEach(function (el) { el.classList.remove('instant'); });
+    previewImg.src = imgSrc;
+    showBest();
+    document.querySelectorAll('#sizes button').forEach(function (b) {
+      b.classList.toggle('active', Number(b.dataset.n) === n);
+    });
+  }
+
+  // ---------- Управление ----------
+  boardEl.addEventListener('click', function (ev) {
+    var t = ev.target.closest('.tile');
+    if (!t) return;
+    pick(tiles.indexOf(Number(t.dataset.id)));
+  });
+
+  function peek(on) { previewEl.classList.toggle('show', on && !solved); }
+  var peekBtn = document.getElementById('peekBtn');
+  peekBtn.addEventListener('pointerdown', function (e) { e.preventDefault(); peek(true); });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(function (t) { peekBtn.addEventListener(t, function () { peek(false); }); });
+  peekBtn.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  document.getElementById('numBtn').addEventListener('click', function () {
+    var on = boardEl.classList.toggle('numbers');
+    this.classList.toggle('on', on);
+  });
+  document.getElementById('shuffleBtn').addEventListener('click', newGame);
+  document.getElementById('againBtn').addEventListener('click', newGame);
+  document.getElementById('sendBtn').addEventListener('click', function () {
+    // Формат для бота: PUZZLE_SOLVED|размер|ходы|секунды
+    try { tg.sendData('PUZZLE_SOLVED|' + n + '|' + moves + '|' + seconds); } catch (e) {}
+  });
+  document.getElementById('sizes').addEventListener('click', function (ev) {
+    var b = ev.target.closest('button');
+    if (!b) return;
+    n = Number(b.dataset.n);
+    store('iqracer_puzzle_size', String(n));
+    newGame();
+  });
+
+  // ---------- Запуск ----------
+  var wanted = Number(params.get('size') || store('iqracer_puzzle_size'));
+  if (wanted >= 3 && wanted <= 5) n = wanted;
+
+  // Картинка: ?img=… → puzzle.jpg рядом со страницей → нарисованная в коде (на случай, если файла нет)
+  var candidates = [];
+  if (params.get('img')) candidates.push(params.get('img'));
+  candidates.push('puzzle.jpg');
+  (function tryNext(i) {
+    if (i >= candidates.length) { imgSrc = DEFAULT_IMG; newGame(); return; }
+    var probe = new Image();
+    probe.onload = function () { imgSrc = candidates[i]; newGame(); };
+    probe.onerror = function () { tryNext(i + 1); };
+    probe.src = candidates[i];
+  })(0);
+})();
+</script>
+</body>
+</html>
